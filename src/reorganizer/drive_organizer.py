@@ -99,7 +99,7 @@ class DriveOrganizer:
             file_ext = self._get_file_extension(file.name)
             file_type = self._categorize_file(file.name, file_groups)
             
-            if file_type and '/' not in file.path:  # Only files in root
+            if file_type:  # Process all files regardless of location
                 # Create folder if needed
                 if file_type not in type_folders:
                     actions.append(ReorganizationAction(
@@ -128,7 +128,7 @@ class DriveOrganizer:
     def organize_by_date(self, items: Dict[str, DriveItem], root_id: str = 'root', preview: bool = True) -> List[ReorganizationAction]:
         """Organize files by creation/modification date"""
         actions = []
-        files = [item for item in items.values() if not item.is_folder and '/' not in item.path]
+        files = [item for item in items.values() if not item.is_folder]
         
         date_folders = {}
         

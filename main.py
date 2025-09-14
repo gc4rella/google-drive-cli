@@ -90,16 +90,20 @@ def duplicates(folder_id, force_refresh, no_cache):
               help='Organization method (default: type)')
 @click.option('--preview/--no-preview', default=True, help='Preview changes before applying')
 @click.option('--execute/--no-execute', default=False, help='Execute the reorganization')
-def organize(folder_id, method, preview, execute):
+@click.option('--force-refresh', is_flag=True, help='Force fresh scan, ignore cache')
+@click.option('--no-cache', is_flag=True, help='Disable caching for this scan')
+@click.option('--cache-ttl', default=2, help='Cache time-to-live in hours (default: 2)')
+def organize(folder_id, method, preview, execute, force_refresh, no_cache, cache_ttl):
     """Reorganize your Google Drive"""
     try:
         # Initialize components
         auth = GoogleDriveAuth()
-        scanner = DriveScanner(auth.get_service())
+        scanner = CachedDriveScanner(auth.get_service(), cache_ttl_hours=cache_ttl)
         organizer = DriveOrganizer(auth.get_service())
-        
-        # Scan drive
-        items = scanner.scan_drive(folder_id)
+
+        # Scan drive with caching
+        use_cache = not no_cache
+        items = scanner.scan_drive(folder_id, force_refresh=force_refresh, use_cache=use_cache)
         
         # Generate reorganization plan
         actions = []
@@ -109,9 +113,25 @@ def organize(folder_id, method, preview, execute):
             actions = organizer.organize_by_date(items, folder_id, preview)
         
         if execute and actions:
-            organizer.execute_actions(actions, confirm=True)
+            # Show execution confirmation
+            console.print("\n" + "="*60)
+            console.print("[bold red]⚠️  EXECUTION CONFIRMATION[/bold red]")
+            console.print("You are about to make the following changes to your Google Drive:")
+            console.print(f"  • [bold]{len([a for a in actions if a.action_type == 'create_folder'])}[/bold] folders will be created")
+            console.print(f"  • [bold]{len([a for a in actions if a.action_type == 'move'])}[/bold] files will be moved")
+            console.print(f"  • [bold]{len([a for a in actions if a.action_type == 'rename'])}[/bold] items will be renamed")
+            console.print(f"  • [bold]{len([a for a in actions if a.action_type == 'delete'])}[/bold] items will be deleted")
+            console.print("\n[dim]This operation cannot be easily undone![/dim]")
+            console.print("="*60)
+
+            from rich.prompt import Confirm
+            if Confirm.ask("\n[bold]Do you want to proceed with these changes?"):
+                organizer.execute_actions(actions, confirm=False)  # Skip double confirmation
+            else:
+                console.print("❌ Operation cancelled.")
         elif not execute:
-            console.print("\nTo execute these changes, run with --execute flag")
+            console.print("\n💡 To execute these changes, run with [bold]--execute[/bold] flag")
+            console.print("   Example: [dim]python main.py organize --execute[/dim]")
         
     except Exception as e:
         console.print(f"❌ Error: {e}")
@@ -119,16 +139,20 @@ def organize(folder_id, method, preview, execute):
 @cli.command()
 @click.option('--folder-id', default='root', help='Folder ID to scan (default: root)')
 @click.option('--execute/--no-execute', default=False, help='Execute the cleanup')
-def cleanup(folder_id, execute):
+@click.option('--force-refresh', is_flag=True, help='Force fresh scan, ignore cache')
+@click.option('--no-cache', is_flag=True, help='Disable caching for this scan')
+@click.option('--cache-ttl', default=2, help='Cache time-to-live in hours (default: 2)')
+def cleanup(folder_id, execute, force_refresh, no_cache, cache_ttl):
     """Clean up empty folders and fix naming issues"""
     try:
         # Initialize components
         auth = GoogleDriveAuth()
-        scanner = DriveScanner(auth.get_service())
+        scanner = CachedDriveScanner(auth.get_service(), cache_ttl_hours=cache_ttl)
         organizer = DriveOrganizer(auth.get_service())
-        
-        # Scan drive
-        items = scanner.scan_drive(folder_id)
+
+        # Scan drive with caching
+        use_cache = not no_cache
+        items = scanner.scan_drive(folder_id, force_refresh=force_refresh, use_cache=use_cache)
         
         # Generate cleanup actions
         empty_folder_actions = organizer.clean_empty_folders(items, preview=True)
@@ -137,9 +161,23 @@ def cleanup(folder_id, execute):
         all_actions = empty_folder_actions + naming_actions
         
         if execute and all_actions:
-            organizer.execute_actions(all_actions, confirm=True)
+            # Show execution confirmation for cleanup
+            console.print("\n" + "="*60)
+            console.print("[bold red]⚠️  CLEANUP CONFIRMATION[/bold red]")
+            console.print("You are about to clean up your Google Drive:")
+            console.print(f"  • [bold]{len(empty_folder_actions)}[/bold] empty folders will be removed")
+            console.print(f"  • [bold]{len(naming_actions)}[/bold] items will be renamed for consistency")
+            console.print("\n[dim]This operation cannot be easily undone![/dim]")
+            console.print("="*60)
+
+            from rich.prompt import Confirm
+            if Confirm.ask("\n[bold]Do you want to proceed with cleanup?"):
+                organizer.execute_actions(all_actions, confirm=False)
+            else:
+                console.print("❌ Cleanup cancelled.")
         elif not execute:
-            console.print("\nTo execute these changes, run with --execute flag")
+            console.print("\n💡 To execute cleanup, run with [bold]--execute[/bold] flag")
+            console.print("   Example: [dim]python main.py cleanup --execute[/dim]")
         
     except Exception as e:
         console.print(f"❌ Error: {e}")
